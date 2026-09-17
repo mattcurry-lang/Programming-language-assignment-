@@ -1,1 +1,31 @@
 # Programming-language-assignment-
+
+Question 2: M-Pesa Transaction Verification and Recovery
+
+GROUP 2  REPORT FROM LUA language model 
+
+Institution: Dedan Kimathi University of Technology
+School: School of Computer Science and IT
+Department: Department of Computer Science
+Unit: Programming Languages
+Unit Code: CCS 2105
+Group: Group 2
+
+Mathew Kibet Mutai C026-01-0961/2025
+Isaac Opiyo Wafula  C026-01-0976/2025
+Victor mawira C026-01-0936/2025
+
+1.	Introduction
+ Fictional M-Pesa agent system modelled using Lua coroutines. A real M-Pesa transaction does not happen instantly,it moves through a sequence of checks before it is finally confirmed. In this exercise that sequence is broken into five stages: the request being received, the customer's details being checked, the customer's balance being verified, the transaction being authorized, and finally a receipt being generated. The key rule given in the scenario is that a transaction which fails the balance-verification stage must stop there and must not be allowed to continue on to authorization. Several transactions also need to be processed at the same time, in an interleaved fashion, without one transaction's progress interfering with another's.
+Lua coroutines are a natural fit for this kind of problem because each coroutine can pause itself midway through a multi-step process using coroutine.yield(), hand control back to a central scheduler, and then pick up again later from exactly where it left off using coroutine.resume(). This makes it possible to model five separate transactions as five separate "mini programs" that all appear to be running side by side, even though Lua itself only ever executes one of them at any given instant.
+ 
+2  Modelling a transaction as an independent coroutine
+Each transaction in the system is represented by its own coroutine, created inside the makeTransaction() function. When this function is called it is given a small table describing the transaction — an id, the customer's name, the amount being sent, and the customer's current balance — and it wraps a new function around that data using coroutine.create(). Because Lua closures capture the variables around them, that single coroutine effectively "remembers" its own id, customer, amount and balance for as long as it exists, completely separately from any other transaction running at the same time. Nothing is shared between coroutines except what the scheduler explicitly manages, so there is no risk of one transaction's data leaking into another's.
+2 Yielding after every stage 
+After every one of the five processing stages, the coroutine calls coroutine.yield() and passes back a small status table containing the transaction's id, the name of the stage just completed, a status value such as "in_progress", "success" or "failed", and a short human-readable message describing what happened. This is what allows the scheduler to see the transaction's progress one step at a time rather than only finding out the final result. It is also what makes the interleaving possible: because the coroutine gives up control after each stage instead of running straight through to the end, the scheduler gets a chance to move on and give another transaction a turn before coming back.
+3 Rejecting a transaction without affecting others 
+The balance-verification stage is where the scenario's central rule is enforced. Before allowing the transaction to continue, the coroutine checks whether the customer's balance is at least equal to the amount being sent. If it is not, the coroutine yields one final failure status explaining that funds are insufficient, and then returns the string "failed" instead of carrying on to the authorization stage. Returning from the coroutine function is what causes Lua to mark that coroutine as dead, so a rejected transaction simply stops existing as an active task from that point onward. Because every transaction runs inside its own coroutine with its own private state, rejecting one transaction this way has no effect whatsoever on the coroutines belonging to the other transactions, which keep running and yielding exactly as before.
+2 The scheduler 
+The runScheduler() function is the central program that drives all five transactions forward together. It first creates a coroutine for every transaction in the list, then enters a loop that keeps going for as long as at least one coroutine is still active. On every pass through that loop it goes through each job in turn and, importantly, checks coroutine.status() first  if a coroutine is already "dead" it is skipped completely, so a finished or rejected transaction is never accidentally resumed again. For every coroutine that is still alive, the scheduler calls coroutine.resume() and looks at both values it returns: the first is a true/false flag telling it whether the coroutine ran without crashing, and the second is either the yielded status table or the final return value. If the flag comes back false, the scheduler prints an error message for that one transaction and moves on, rather than letting the whole program crash. Once every coroutine has become dead, the loop ends and a final summary table is printed showing the outcome — success or failed — for every transaction that was processed.
+5 Why state is preserved across yield() and resume() 
+An ordinary Lua function loses everything about its progress the moment it returns; calling it again starts it from the very top with fresh local variables. A coroutine behaves differently because it keeps its own separate execution stack. When coroutine.yield() runs, Lua freezes that stack exactly as it is every local variable, including things like the transaction's id and balance, and the exact point in the code the coroutine had reached and hands control back to whoever called resume(). The next time that same coroutine is resumed, execution does not restart from the beginning; it carries on immediately after the yield() call with all of those local variables still holding the values they had before. This is precisely why each transaction in this program can be paused after, say, the customer-check stage and picked up again later at the balance-verification stage without the scheduler having to manually save and reload any of its data itself — the coroutine does that automatically.
